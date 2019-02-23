@@ -4,98 +4,97 @@
 
     </head>
     <body>
-        <input id="rpm" type="range" min="0" max="7500" value="1000" />
-        <input id="record" type="button" value="Record" />
+        <input id="generate" type="button" value="Generate" onclick="generate()" />
         <br>
         <canvas id="overlay" width="400" height="150"></canvas>
 
         <script src="node_modules/jszip/dist/jszip.min.js"></script>
         <script src="node_modules/file-saver/dist/FileSaver.min.js"></script>
         <script>
+            const rpms = [
+                821.75,
+                2291.00,
+                1315.75,
+                687.75,
+                2116.75,
+                2746.00,
+                1690.00,
+                891.00,
+                1445.25
+            ];
+
             let canvas = document.getElementById('overlay');
             let ctx = canvas.getContext('2d');
 
-            let recording = false;
             let zip;
             let imageFolder;
             
-            let now;
-            let then = Date.now();
             let frameIndex = 0;
             const fps = 25;
+
             const barCount = 25;
-            let interval = 1000/fps;
-            let rpmSlider = document.getElementById("rpm");
 
-            window.requestAnimationFrame(draw);
+            function generate() {
+                zip = new JSZip();
+                imageFolder = zip.folder("images");
+            
+                Promise.all(rpms
+                    .reduce((accumulator, rpm) => {
+                        accumulator.length == 0 ? accumulator.push(rpm) : accumulator = accumulator.concat(interpolate(accumulator[accumulator.length - 1], rpm, 25));
+                        return accumulator;
+                    }, [])
+                    .map(rpm => generateFrame(Math.round(rpm)))
+                ).then(values => saveZip());
+            }
 
-            document.getElementById("record").onclick = function() {
-                if (!recording) {
-                    record();
-                    document.getElementById("record").value = "Stop";
-                } else {
-                    generateZip();
-                    document.getElementById("record").value = "Record";
-                }
-            };
+            function interpolate(start, end, steps) {
+                let increment = (end - start) / steps;
 
-            function draw() {
+                return Array.from(Array(steps).keys()).map(i => start + increment * i);
+            }
 
-                now = Date.now();
-                let delta = now - then;
+            function drawRpmGauge(rpm) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                window.requestAnimationFrame(draw);
+                let step = 7500 / barCount;
+                let rpmSteps = rpm / step;
 
-                if (delta > interval) {
-                    frameIndex++;
-                    then = now - (delta % interval);
+                for (let i = 0; i < barCount; i++) {
 
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                    let step = 7500 / barCount;
-                    let rpmSteps = rpmSlider.value / step;
-
-                    for (let i = 0; i < barCount; i++) {
-
-                        if (rpmSteps <= i) {
-                            ctx.fillStyle = 'rgb(50, 0, 0)';
-                        } else {
-                            ctx.fillStyle = 'rgb(200, 0, 0)';
-                        }
-
-                        ctx.fillRect(
-                            5 + i * 15,
-                            150 - (i * 3 + ramp(i)),
-                            10,
-                            5 + (i * 3 + ramp(i))
-                        );
+                    if (rpmSteps <= i) {
+                        ctx.fillStyle = 'rgb(50, 0, 0)';
+                    } else {
+                        ctx.fillStyle = 'rgb(200, 0, 0)';
                     }
 
-                    ctx.font = "60px Verdana";
-                    ctx.fillText(rpmSlider.value, 10, 90);
-
-                    if (recording) {
-                        canvas.toBlob(function(blob) {
-                            imageFolder.file("image_" + frameIndex + ".png", blob, { base64: true });
-                        });
-                    }
+                    ctx.fillRect(
+                        5 + i * 15,
+                        150 - (i * 3 + ramp(i)),
+                        10,
+                        5 + (i * 3 + ramp(i))
+                    );
                 }
+
+                ctx.font = "60px Verdana";
+                ctx.fillText(rpm, 10, 90);
             }
 
             function ramp(x) {
                 return x * x / 8;
             }
 
-            function record() {
-                recording = true;
+            function generateFrame(rpm) {
+                return new Promise(resolve => {
+                    drawRpmGauge(rpm);
 
-                zip = new JSZip();
-                imageFolder = zip.folder("images");
+                    canvas.toBlob(function(blob) {
+                        imageFolder.file("image_" + frameIndex++ + ".png", blob, { base64: true });
+                        resolve(frameIndex);
+                    });
+                });
             }
 
-            function generateZip() {
-                recording = false;
-
+            function saveZip() {
                 zip.generateAsync({ type:"blob" })
                     .then(function(content) {
                         saveAs(content, "rpm_gauge.zip");
